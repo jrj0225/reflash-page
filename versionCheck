@@ -1,0 +1,104 @@
+import { Modal, notification, Button } from "antd";
+import React from 'react';
+// 存储当前脚本标签的哈希值集合
+let scriptHashes = new Set<string>();
+let timer: ReturnType<typeof setInterval> | undefined;
+
+/**
+ * 从首页获取脚本标签的哈希值集合
+ * @returns {Promise<Set<string>>} 返回包含脚本标签的哈希值的集合
+ */
+async function fetchScriptHashes() {
+  // 获取首页HTML内容
+  const html = await fetch("/",{
+    headers: {
+      'Cache-Control': 'no-cache',
+      'Pragma': 'no-cache',
+      'Expires': '0'
+    },
+    cache: 'no-store'
+  }).then((res) => res.text());
+  // 正则表达式匹配所有<script>标签
+  const scriptRegex = /<script*(?:\s+[^>]*)?>(.*?)<\/script\s*>/gi;
+  // 获取匹配到的所有<script>标签内容
+  const scripts = html.match(scriptRegex) ?? [];
+  // 将脚本标签内容存入集合并返回
+  return new Set(scripts);
+}
+
+/**
+ * 比较当前脚本标签的哈希值集合与新获取的集合，检测是否有更
+ */
+async function compareScriptHashes() {
+  let newScriptHashes = new Set<string>();
+  try {
+    // 获取新的脚本标签哈希值集合
+   newScriptHashes = await fetchScriptHashes();
+  } catch (error) {
+    console.error("获取脚本标签哈希值集合失败", error);
+  }
+  
+  if (newScriptHashes?.size === 0) {
+    return;
+  }
+
+  if (scriptHashes.size === 0) {
+    // 初次运行时，存储当前脚本标签哈希值
+    scriptHashes = newScriptHashes;
+  } else if (
+    scriptHashes.size !== newScriptHashes.size ||
+    !Array.from(scriptHashes).every((hash) => newScriptHashes.has(hash))
+  ) {
+    // 如果脚本标签数量或内容发生变化，则认为有更新
+    console.info("检测到新版本", {
+      oldScript: Array.from(scriptHashes),
+      newScript: Array.from(newScriptHashes),
+    });
+
+    // 清除定时器
+    if (timer) {
+      clearInterval(timer);
+    }
+    // 使用 notification 提示用户更新,并有按钮可以刷新页面
+    notification.info({
+      message: "版本更新提示",
+      description: "检测到新版本，建议刷新页面以确保平台正常使用",
+      placement: "topRight",
+      duration: 0,
+      btn: React.createElement('div', { style: { display: 'flex', gap: '8px' } }, [
+        React.createElement(Button, {
+          type: 'primary',
+          shape: "round",
+          onClick: () => window.location.replace(window.location.href),
+          children: '立即刷新'
+        }),
+        React.createElement(Button, {
+          shape: "round",
+          onClick: () => notification.close("version-update"),
+          children: '稍后刷新'
+        })
+      ]),
+      key: "version-update",
+      style: {
+        width: 400,
+      },
+    });
+  } else {
+    console.log("版本检查完成，未发现更新");
+  }
+}
+
+/**
+ * 初始化版本检查
+ */
+export function initVersionCheck() {
+  const NODE_ENV = process.env.NODE_ENV;
+  if (NODE_ENV !== "development") {
+    // 每10秒检查一次是否有新的脚本标签更新
+    timer = setInterval(compareScriptHashes, 10000);
+    console.log("版本检查定时器已启动");
+  } else {
+    console.log("版本检查功能未启用");
+  }
+}
+initVersionCheck();
